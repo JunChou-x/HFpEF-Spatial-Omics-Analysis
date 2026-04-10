@@ -32,8 +32,3 @@ The analyses were primarily performed using R and Python. Major packages include
 * Scanpy
 * pySCENIC
 
-## 🚀 Usage
-1. Clone this repository:
-   ```bash
-   git clone [https://github.com/YourUsername/HFpEF-Spatial-Metabolism.git](https://github.com/YourUsername/HFpEF-Spatial-Metabolism.git)
-   cd HFpEF-Spatial-Metabolism
