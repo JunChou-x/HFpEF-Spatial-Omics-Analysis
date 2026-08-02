@@ -1,34 +1,148 @@
-# High-resolution spatial transcriptomics reveals fibroblast-cardiomyocyte metabolic coupling in heart failure with preserved ejection fraction
+# High-Resolution Spatial Transcriptomics in HFpEF
 
-## 📖 Overview
-This repository contains the custom code and analytical pipelines for the study: **"High-resolution spatial transcriptomics reveals fibroblast-cardiomyocyte metabolic coupling in heart failure with preserved ejection fraction"**.
+This repository is the analysis-code archive for the study
+"High-resolution spatial transcriptomics reveals fibroblast-cardiomyocyte
+metabolic coupling in heart failure with preserved ejection fraction".
 
-Heart failure with preserved ejection fraction (HFpEF) is driven by complex interactions among metabolic stress, fibrosis, and microvascular dysfunction. In this study, we integrated single-cell-informed deconvolution with Visium HD spatial transcriptomics to map the myocardial landscape in a two-hit murine model of early-stage HFpEF. Our analysis identifies spatially organized fibroblast-cardiomyocyte metabolic coupling as a prominent feature of HFpEF and suggests niche-associated signaling programs (such as COMP/THBS1-CD36) as potential therapeutic targets.
+It is organized around manuscript figures rather than a turnkey command-line
+pipeline. Raw sequencing data, intermediate Seurat objects, spatial outputs,
+and the `AuxFunctions.R` helper referenced by the scripts are external inputs
+and are not included here.
 
-## 🗂️ Repository Structure
-The analysis scripts in this repository are named according to the corresponding figures in the manuscript (e.g., `Figure1.R`, `SFigure2.R`, etc.). 
+## Analysis architecture
 
-Collectively, these scripts cover the following main analytical workflows:
-* **Data Preprocessing & Annotation:** Quality control, clustering, and cell type annotation for both scRNA-seq and Visium HD datasets.
-* **Spatial Deconvolution:** Mapping single-cell signatures to spatial microenvironments to identify pathological niches.
-* **Transcriptomic Remodeling Analysis:** Differential expression and pathway enrichment analysis evaluating metabolic reprogramming (e.g., fatty acid oxidation) in fibroblasts and endothelial cells.
-* **Cell-Cell Communication:** Inferring intercellular signaling networks (specifically focusing on the COMP/THBS-CD36 axis) across matched cell populations.
+```text
+Raw scRNA-seq folders + Merge.rds
+            |
+            v
+     scRNA_object.R -> scObj.rds
 
-## 💻 System Requirements
+Visium HD matrix folders + AuxFunctions.R
+            |
+            v
+     spatial_object.R -> merged.object in the active R session
+            |
+            v
+       Figure1.R bootstrap
+            |
+            +--> Figure2.R  cardiomyocyte states
+            +--> Figure3.R  fibroblast states and CellChat
+            +--> Figure4.R  endothelial/mural states and CellChat
+            +--> Figure5.R  spatial niches and ligand-target analysis
+            +--> SFigure1.R ... SFigure5.R supplementary analyses
 
-### Hardware Requirements
-The spatial transcriptomics and deconvolution analysis require a standard computer/server with at least 64GB RAM.
+SFigure2.R / SFigure3.R -> pysenic_*.h5ad
+                                   + external pySCENIC -> *.loom
+                                   |
+                                   +--> python_pyscenic_*.py
 
-### Software Dependencies
-The analyses were primarily performed using R and Python. Major packages include:
+External RDS objects (subset_object.rds, scOjb1.rds, scOjb2.rds)
+            |
+            v
+        Figure6.R -> stress/perivascular CellChat analysis
+```
 
-**R (>= 4.2.0)**
-* Seurat (>= 4.3.0 or 5.0.0)
-* CellChat
-* clusterProfiler
-* (Add your spatial deconvolution package here, e.g., RCTD)
+The shared R objects are intentionally kept in memory. Figure scripts are
+therefore normally sourced in one R session after the preparation scripts.
+Detailed object contracts and dependencies are listed in
+[`docs/architecture.md`](docs/architecture.md).
 
-**Python (>= 3.9)**
-* Scanpy
-* pySCENIC
+## Repository layout
 
+```text
+HFpEF-Spatial-Omics-Analysis/
+|- scRNA_object.R                 scRNA-seq preprocessing and annotation
+|- spatial_object.R               Visium HD loading and spatial annotation
+|- Figure1.R ... Figure6.R        Main manuscript figures
+|- SFigure1.R ... SFigure5.R      Supplementary figures
+|- python_pyscenic_*.py           pySCENIC result summaries
+`- docs/architecture.md
+```
+
+## Expected inputs
+
+The scripts use relative paths from the repository root. At minimum, prepare:
+
+### scRNA-seq preparation
+
+- `Control1/`, `Control2/`, `HFpEF1/`, and `HFpEF2/` in 10x format.
+- `Merge.rds`, because `scRNA_object.R` reloads this object before the final
+  preprocessing steps.
+- `DoubletFinder`, Seurat, Harmony, and the other packages imported by
+  `scRNA_object.R`.
+
+The script writes `scObj.rds` after assigning broad cell-type labels.
+
+### Spatial preparation
+
+- Visium HD output folders under `data/spatial_data` as configured in
+  `spatial_object.R`.
+- `AuxFunctions.R`, which is sourced by `spatial_object.R` and `Figure1.R` but
+  is not present in this repository.
+- `BPCells`, Arrow, Seurat, Harmony, and the imported plotting packages.
+
+`spatial_object.R` leaves `merged.object` in the active R session instead of
+writing an RDS file.
+
+### pySCENIC summaries
+
+The Python scripts expect these pairs in the working directory:
+
+| Script | H5AD | Loom |
+| --- | --- | --- |
+| `python_pyscenic_cm.py` | `pysenic_cm.h5ad` | `cm_pyscenic_output.loom` |
+| `python_pyscenic_ec.py` | `pysenic_ec.h5ad` | `ec_pyscenic_output.loom` |
+| `python_pyscenic_fb.py` | `pysenic_fb.h5ad` | `fb_pyscenic_output.loom` |
+
+The cardiomyocyte/fibroblast H5AD files are generated by `SFigure2.R` and
+`SFigure3.R`; the endothelial H5AD file is generated by `Figure4.R`. The loom
+files must be produced by an external pySCENIC run first.
+
+## Suggested execution order
+
+Run from the repository root and keep the R objects in one session:
+
+```r
+source("scRNA_object.R")
+source("spatial_object.R")
+source("Figure1.R")
+source("Figure2.R")
+source("Figure3.R")
+source("Figure4.R")
+source("Figure5.R")
+source("SFigure1.R")
+source("SFigure2.R")
+source("SFigure3.R")
+source("SFigure4.R")
+source("SFigure5.R")
+```
+
+Run `Figure6.R` separately after providing its three required RDS objects.
+Run the Python scripts only after their H5AD and loom inputs exist.
+
+## Software baseline
+
+The code mixes R and Python. The main R dependencies include Seurat,
+SeuratObject, Harmony, BPCells, Arrow, CellChat, NicheNet, clusterProfiler,
+tradeSeq, monocle3, and the plotting packages imported by each figure script.
+The Python summaries use Scanpy, AnnData, loompy, NumPy, pandas, SciPy,
+Matplotlib, seaborn, and `adjustText`.
+
+Because package versions and raw inputs are not pinned in this repository,
+recreate the original analysis environment before interpreting numerical
+results.
+
+## Current limitations
+
+- Figure scripts are stateful and are not independent command-line programs.
+- Several data and RDS paths are hard-coded and must match the local analysis
+  workspace.
+- `AuxFunctions.R` is referenced but not included, so a fresh checkout is not
+  executable without the companion helper file.
+- Most figures are printed to the active graphics device; there is no shared
+  `results/` writer or manifest.
+
+## License
+
+No explicit license file is currently included. Confirm the intended license
+before redistributing the code, data, artwork, or generated results.
