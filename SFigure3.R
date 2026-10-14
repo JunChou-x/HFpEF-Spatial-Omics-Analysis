@@ -68,7 +68,211 @@ p <- ggplot(data_to_plot, aes(x = condition, fill = L5)) +
 
 p
 
-# SFig3.C -----------------------------------------------------------------
+
+
+# SFig3.C ------------------------------------------------------------------
+
+
+ora_results_directional_list <- list()
+for (current_type in target_fbs) {
+  
+  cat(paste0("\n=== Analyzing: ", current_type, " ===\n"))
+  de_data_unique <- final_DE_results %>% 
+    filter(cell_type == current_type) %>% 
+    filter(!gene %in% c("Hba-a2", "Hbb-bs")) 
+  if(nrow(de_data_unique) < 5) { 
+    cat(paste0("  [Skip]  (<5)\n"))
+    next 
+  }
+  ids <- tryCatch({
+    bitr(de_data_unique$gene, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = "org.Mm.eg.db")
+  }, error = function(e) { return(NULL) })
+  if (is.null(ids)) { cat("  [Skip] ID conversion failed\n"); next }
+  de_data_unique <- merge(de_data_unique, ids, by.x = "gene", by.y = "SYMBOL") %>%
+    distinct(ENTREZID, .keep_all = TRUE)
+  sig_genes_up <- de_data_unique %>% filter(p_val_adj < 0.05, avg_log2FC > 0) %>% pull(ENTREZID)
+  sig_genes_down <- de_data_unique %>% filter(p_val_adj < 0.05, avg_log2FC < 0) %>% pull(ENTREZID)
+  current_cell_results <- list()
+  if(length(sig_genes_up) > 5) { 
+    ora_up <- tryCatch({
+      enrichGO(gene = sig_genes_up, OrgDb = org.Mm.eg.db, ont = "BP",
+               pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.2)
+    }, error = function(e) NULL)
+    
+    if (!is.null(ora_up) && nrow(as.data.frame(ora_up)) > 0) {
+      current_cell_results[["Up"]] <- as.data.frame(ora_up) %>% 
+        mutate(Regulation = "Up-regulated", 
+               cell_type = current_type) 
+      cat(paste0(" Upregulate pathway: ", nrow(current_cell_results[["Up"]]), " 条\n"))
+    } else {
+      cat("No significant upregulation pathway\n")
+    }
+  } else { cat("Upregulation of gene deficiency\n") }
+  
+  if(length(sig_genes_down) > 5) {
+    ora_down <- tryCatch({
+      enrichGO(gene = sig_genes_down, OrgDb = org.Mm.eg.db, ont = "BP",
+               pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 0.2)
+    }, error = function(e) NULL)
+    
+    if (!is.null(ora_down) && nrow(as.data.frame(ora_down)) > 0) {
+      current_cell_results[["Down"]] <- as.data.frame(ora_down) %>% 
+        mutate(Regulation = "Down-regulated", 
+               cell_type = current_type) 
+      cat(paste0(" Downregulation pathway: ", nrow(current_cell_results[["Down"]]), "\n"))
+    } else {
+      cat("No significant downregulation pathways\n")
+    }
+  } else { cat("Downregulation of genes is insufficient\n") }
+  
+  if (length(current_cell_results) > 0) {
+    ora_results_directional_list[[current_type]] <- bind_rows(current_cell_results)
+  }
+}
+
+plot_data_directional <- bind_rows(ora_results_directional_list)
+
+if (nrow(plot_data_directional) == 0) {
+  stop("No significant pathways were found in any of the subgroups.")
+}
+
+plot_data_filtered <- plot_data_directional %>%
+  mutate(Description = str_trunc(Description, width = 50)) %>%
+  group_by(cell_type, Regulation) %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 5) %>% 
+  ungroup() 
+all_pathway_data <- dplyr::bind_rows(ora_results_directional_list, .id = "cell_type")
+top_pathways_summary <- all_pathway_data %>%
+  dplyr::group_by(cell_type, Regulation) %>%
+  dplyr::arrange(p.adjust) %>%
+  dplyr::slice_head(n = 20) %>% 
+  dplyr::ungroup() %>%
+  dplyr::select(cell_type, Regulation, Description, p.adjust, Count) 
+unique_types <- unique(top_pathways_summary$cell_type)
+for (ctype in unique_types) {
+  cat(paste0("\n>>> Cell subsets: ", ctype, " <<<\n"))
+  up_data <- top_pathways_summary %>% 
+    dplyr::filter(cell_type == ctype, stringr::str_detect(Regulation, "Up"))
+  if(nrow(up_data) > 0) {
+    cat(paste0("  [↑ Up-regulated] (Top ", nrow(up_data), ")\n"))
+    print_df <- up_data %>% 
+      dplyr::mutate(Description = stringr::str_trunc(Description, 40)) %>% 
+      dplyr::select(Description, p.adjust, Count) %>% 
+      as.data.frame()
+    print(print_df, row.names = FALSE)
+  } else {
+    cat("No significant upregulation pathway\n")
+  }
+  cat("\n")
+  down_data <- top_pathways_summary %>% 
+    dplyr::filter(cell_type == ctype, stringr::str_detect(Regulation, "Down"))
+  if(nrow(down_data) > 0) {
+    cat(paste0("  [↓ Down-regulated] (Top ", nrow(down_data), ")\n"))
+    print_df_down <- down_data %>% 
+      dplyr::mutate(Description = stringr::str_trunc(Description, 40)) %>% 
+      dplyr::select(Description, p.adjust, Count) %>% 
+      as.data.frame()
+    
+    print(print_df_down, row.names = FALSE)
+  } else {
+    cat("No significant downregulation pathways\n")
+  }
+  
+  cat("--------------------------------------------------------\n")
+}
+
+
+plot_data_directional <- dplyr::bind_rows(ora_results_directional_list, .id = "cell_type")
+target_pathways <- c(
+  # --- 1. Ventricular-associated Fibroblasts ---
+  "fatty acid metabolic process",
+  "regulation of cellular ketone metabolic process",
+  "cholesterol homeostasis",
+  "cardiac muscle tissue morphogenesis",
+  "muscle system process",
+  "cardiac muscle contraction",
+  
+  # --- 2. Stress-Response Fibroblasts ---
+  "regulation of lipid biosynthetic process",
+  "cellular ketone metabolic process",
+  "SMAD protein signal transduction",
+  "actomyosin structure organization",
+  "myofibril assembly",
+  "striated muscle cell development",
+  
+  # --- 3. Fibro-Immune Interface ---
+  "fatty acid oxidation",
+  "adaptive thermogenesis",
+  "lipid modification",
+  "heart morphogenesis",
+  
+  # --- 4. Myofibroblasts ---
+  "protein secretion",
+  "acute-phase response",
+  "response to mercury ion",
+  "response to copper ion",
+  
+  # --- 5. Perivascular Fibroblasts ---
+  "regulation of blood circulation",
+  "regulation of ATP-dependent activity",
+  "skeletal muscle cell differentiation",
+  "response to xenobiotic stimulus",
+  "miRNA metabolic process",
+  
+  # --- 6. Atrial-associated Fibroblasts ---
+  "regulation of the force of heart contraction",
+  "cardiac ventricle morphogenesis",
+  
+  # --- 7. Resident Fibroblasts ---
+  "cellular response to leucine starvation"
+)
+
+cell_type_order <- c(
+  "Ventricular-associated Fibroblasts",
+  "Stress-Response Fibroblasts",
+  "Fibro-Immune Interface",
+  "Myofibroblasts",
+  "Perivascular Fibroblasts",
+  "Atrial-associated Fibroblasts",
+  "Resident Fibroblasts"
+)
+
+plot_data_filtered <- plot_data_directional %>%
+  filter(tolower(Description) %in% tolower(target_pathways)) %>%
+  mutate(cell_type = factor(cell_type, levels = cell_type_order)) %>%
+  mutate(Description = str_trunc(Description, width = 50)) 
+
+
+p <- ggplot(plot_data_filtered, aes(x = Count, y = reorder(Description, -p.adjust))) +
+  geom_segment(aes(x = 0, xend = Count, y = Description, yend = Description), 
+               color = "grey80", linewidth = 0.5) +
+  geom_point(aes(size = Count, color = p.adjust)) +
+  scale_color_gradient(low = "#E64B35", high = "#3C5488", trans = "log10", name = "Adj. P-value") +
+  facet_grid(Regulation ~ cell_type, scales = "free", space = "free_y") +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(), 
+    axis.text.y = element_text(size = 10, color = "black"),
+    strip.background = element_rect(fill = "#F0F0F0", color = "black"), 
+    strip.text = element_text(face = "bold", size = 10), 
+    strip.text.x = element_text(angle = 0), 
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1) 
+  ) +
+  
+  labs(
+    title = " ",
+    x = "Gene Count",
+    y = NULL
+  )
+
+print(p)
+
+
+
+# SFig3.D -----------------------------------------------------------------
 
 genes_to_plot <- c("Pdk4", "Fabp3", "Cpt1b", "Comp")
 fb_subset$L5 <- droplevels(fb_subset$L5)
@@ -81,7 +285,7 @@ VlnPlot(fb_subset,
         ncol = 1) + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 
-# SFig3.D -----------------------------------------------------------------
+# SFig3.E -----------------------------------------------------------------
 
 fibro_idents <- c(
   "Resident Fibroblasts", "Atrial-associated Fibroblasts",
@@ -134,7 +338,7 @@ GetH5ad(
 
 # to Python
 
-# SFig3.E -----------------------------------------------------------------
+# SFig3.F -----------------------------------------------------------------
 
 cellchat_ctrl@idents <- as.factor(cellchat_ctrl@meta$L5)
 names(cellchat_ctrl@idents) <- colnames(cellchat_ctrl@data)
@@ -167,3 +371,57 @@ gg2 <- gg2 + ggtitle("Differential Interactions (Strength)")
 
 gg1 + gg2
 
+
+
+# SFig3.G -----------------------------------------------------------------
+
+sources.use <- c(
+  "Ventricular-associated Fibroblasts", "Atrial-associated fibroblasts", "Resident fibroblasts",
+  "Myofibroblasts", "Perivascular Fibroblasts", "Stress-Response Fibroblasts",
+  "Fibro-Immune Interface"
+)
+
+targets.use <- c(
+  "Ventricular Cardiomyocytes", "Atrial Cardiomyocytes", 
+  "Stressed Cardiomyocytes", "Conduction System Cardiomyocytes",
+  
+  "Ventricular-associated Fibroblasts", "Atrial-associated Fibroblasts", "Resident fibroblasts",
+  "Myofibroblasts", "Perivascular Fibroblasts", "Stress-Response Fibroblasts", "Fibro-Immune Interface"
+)
+
+p <- netVisual_bubble(cellchat, 
+                      sources.use = sources.use, 
+                      targets.use = targets.use, 
+                      comparison = c(1, 2), 
+                      angle.x = 45)
+
+
+# 5. 打印最终图像
+print(p)
+
+
+# SFig3.H -----------------------------------------------------------------
+
+pathways.show <- c("THBS") 
+group.cell <- levels(cellchat@idents)
+
+# Control 
+netVisual_aggregate(cellchat_ctrl, 
+                    signaling = pathways.show, 
+                    layout = "chord", 
+                    title.name = "Control: THBS Signaling",
+                    show.legend = FALSE)
+# HFpEF 
+netVisual_aggregate(cellchat_hfpef, 
+                    signaling = pathways.show, 
+                    layout = "chord", 
+                    title.name = "HFpEF: THBS Signaling",
+                    show.legend = FALSE)
+
+
+
+
+
+
+
+                         
