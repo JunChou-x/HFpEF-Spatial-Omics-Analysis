@@ -106,7 +106,31 @@ p <- ggplot(data_to_plot, aes(x = condition, fill = L5)) +
 p
 
 
-# SFig4.C -----------------------------------------------------------------
+
+# SFig4.C,E ------------------------------------------------------------------
+
+cellchat_ctrl <- readRDS("./cellchat_ctrl.rds")
+cellchat_hfpef <- readRDS("./cellchat_hfpef.rds")
+
+sources.use <- c("Stressed Cardiomyocytes","Perivascular Fibroblasts", "Resident Fibroblasts","Stress-Response Fibroblasts")
+targets.use <- c("Vascular Endothelial Cells", "Endocardial Endothelial Cells","Lymphatic Endothelial Cells")
+
+sources.use <- c("Vascular Endothelial Cells", "Endocardial Endothelial Cells","Lymphatic Endothelial Cells")
+targets.use <-c("Pericytes","Ventricular-associated SMCs", "Arterial SMCs","Atrial-associated  SMCs")
+
+p <- netVisual_bubble(cellchat, 
+                      sources.use = sources.use, 
+                      targets.use = targets.use, 
+                      comparison = c(1, 2), 
+                      angle.x = 45,
+                      remove.isolate = FALSE, 
+                      title.name = " ")
+p + theme(
+  plot.margin = unit(c(5, 5, 5, 25), "mm") 
+)
+
+
+# SFig4.D -----------------------------------------------------------------
 
 target_gene <- "Cd36"
 gene_data <- FetchData(merged.object, vars = c(target_gene, "condition"))
@@ -164,6 +188,80 @@ p1 <- ggplot(plot_data) +
   theme(axis.text.y = element_text(size = 10)) 
 
 print(p1)
+
+
+
+# SFig4.F ------------------------------------------------------------------
+
+mural_cells <- subset(merged.object, idents = c("Pericytes", "Ventricular-associated SMCs","Atrial-associated SMCs", "Arterial SMCs"))
+
+features_mural <- c(
+  "Pdk4", "Fabp3", "Cpt1b", "Angptl4", "Txnip",
+  "Acta2", "Tagln", "Myh11", "Rgs5"
+)
+features_mural <- intersect(features_mural, rownames(mural_cells))
+
+Idents(mural_cells) <- "L5"
+target_subtypes <- c("Pericytes", "Ventricular-associated SMCs","Atrial-associated SMCs", "Arterial SMCs")
+
+de_results_list <- list()
+for (ctype in target_subtypes) {
+  res <- FindMarkers(
+    mural_cells,
+    ident.1 = "HFpEF",
+    ident.2 = "Control",
+    group.by = "condition",
+    subset.ident = ctype,
+    features = features_mural,
+    min.pct = 0,
+    logfc.threshold = 0
+  )
+  res$Gene <- rownames(res)
+  res$CellType <- ctype
+  de_results_list[[ctype]] <- res
+}
+
+plot_data <- do.call(rbind, de_results_list)
+
+plot_data <- plot_data %>%
+  mutate(
+    log_p = -log10(p_val_adj + 1e-300),
+    log_p_capped = ifelse(log_p > 50, 50, log_p),
+    avg_log2FC_capped = case_when(
+      avg_log2FC > 2 ~ 2,
+      avg_log2FC < -2 ~ -2,
+      TRUE ~ avg_log2FC
+    )
+  )
+
+plot_data$Gene <- factor(plot_data$Gene, levels = rev(features_mural))
+plot_data$CellType <- factor(plot_data$CellType, levels = rev(target_subtypes))
+
+p_mural <- ggplot(plot_data, aes(x = CellType, y = Gene)) +
+  geom_point(aes(size = log_p_capped, color = avg_log2FC_capped)) +
+  scale_color_gradient2(
+    name = "log2FC\n(HFpEF vs Ctrl)",
+    low = "#3C5488",
+    mid = "white",
+    high = "#E64B35",
+    midpoint = 0
+  ) +
+  scale_size_continuous(
+    name = "-log10(P-adj)",
+    range = c(1,8)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, face = "bold"),
+    axis.text.y = element_text(face = "italic"),
+    legend.position = "right"
+  ) +
+  labs(x = "", y = "", title = "")
+
+p_mural
+
 
 
 
